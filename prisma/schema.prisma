@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ScanStatus {
+  QUEUED
+  STARTING_BROWSER
+  DISCOVERING_PAGES
+  SCANNING_PAGES
+  RUNNING_LAYOUT_ANALYSIS
+  CHECKING_CONTENT
+  RUNNING_ACCESSIBILITY_AUDIT
+  AI_VISUAL_REVIEW
+  GENERATING_REPORT
+  COMPLETED
+  FAILED
+}
+
+enum ScanType {
+  QUICK
+  FULL
+}
+
+enum IssueCategory {
+  DESIGN
+  LAYOUT
+  RESPONSIVE
+  TYPOGRAPHY
+  CONTENT
+  SPELLING
+  GRAMMAR
+  UX
+  ACCESSIBILITY
+  SEO
+  PERFORMANCE
+  IMAGES
+  LINKS
+  FORMS
+  CONSOLE
+  TECHNICAL
+}
+
+enum IssueSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  SUGGESTION
+}
+
+enum IssueStatus {
+  OPEN
+  FIXED
+  IGNORED
+}
+
+enum DetectionSource {
+  RULE
+  AXE
+  AI
+  LIGHTHOUSE
+}
+
+model User {
+  id          String            @id @default(cuid())
+  externalId  String            @unique
+  email       String?
+  name        String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  memberships WorkspaceMember[]
+}
+
+model Workspace {
+  id            String            @id @default(cuid())
+  name          String
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  members       WorkspaceMember[]
+  websites      Website[]
+  scans         Scan[]
+  subscriptions Subscription[]
+  usageEvents   UsageEvent[]
+}
+
+model WorkspaceMember {
+  id          String     @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        MemberRole @default(MEMBER)
+  createdAt   DateTime   @default(now())
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Website {
+  id          String    @id @default(cuid())
+  workspaceId String
+  url         String
+  domain      String
+  platform    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scans       Scan[]
+
+  @@unique([workspaceId, domain])
+  @@index([workspaceId])
+}
+
+model Scan {
+  id           String       @id @default(cuid())
+  workspaceId  String
+  websiteId    String
+  submittedUrl String
+  normalizedUrl String
+  type         ScanType
+  status       ScanStatus   @default(QUEUED)
+  progress     Int          @default(0)
+  maxPages     Int          @default(1)
+  score        Int?
+  categoryScores Json?
+  summary      String?
+  errorMessage String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  failedAt     DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  website      Website      @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  pages        ScanPage[]
+  issues       Issue[]
+  screenshots  Screenshot[]
+  metrics      ScanMetric[]
+
+  @@index([workspaceId, createdAt])
+  @@index([websiteId, createdAt])
+}
+
+model ScanPage {
+  id            String       @id @default(cuid())
+  scanId        String
+  workspaceId   String
+  url           String
+  title         String?
+  httpStatus    Int?
+  loadTimeMs    Int?
+  redirectChain Json?
+  discoveredLinks Json?
+  score         Int?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  scan          Scan         @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  issues        Issue[]
+  screenshots   Screenshot[]
+  metrics       ScanMetric[]
+
+  @@unique([scanId, url])
+  @@index([workspaceId])
+}
+
+model Issue {
+  id             String          @id @default(cuid())
+  scanId         String
+  scanPageId     String?
+  workspaceId    String
+  pageUrl        String
+  category       IssueCategory
+  type           String
+  severity       IssueSeverity
+  status         IssueStatus     @default(OPEN)
+  title          String
+  description    String
+  recommendation String
+  viewport       Json?
+  selector       String?
+  confidence     Float
+  screenshotId   String?
+  detectedBy     DetectionSource
+  technicalDetails Json?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  scan           Scan            @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  page           ScanPage?       @relation(fields: [scanPageId], references: [id], onDelete: SetNull)
+  screenshot     Screenshot?     @relation(fields: [screenshotId], references: [id], onDelete: SetNull)
+
+  @@index([scanId, severity])
+  @@index([scanId, category])
+  @@index([workspaceId])
+}
+
+model Screenshot {
+  id          String    @id @default(cuid())
+  scanId      String
+  scanPageId  String
+  workspaceId String
+  url         String
+  viewport    Json
+  kind        String
+  storageKey  String
+  width       Int
+  height      Int
+  createdAt   DateTime  @default(now())
+  scan        Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  page        ScanPage  @relation(fields: [scanPageId], references: [id], onDelete: Cascade)
+  issues      Issue[]
+
+  @@index([scanId])
+  @@index([workspaceId])
+}
+
+model ScanMetric {
+  id          String   @id @default(cuid())
+  scanId      String
+  scanPageId  String?
+  workspaceId String
+  name        String
+  value       Float
+  unit        String?
+  source      String
+  createdAt   DateTime @default(now())
+  scan        Scan     @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  page        ScanPage? @relation(fields: [scanPageId], references: [id], onDelete: SetNull)
+
+  @@index([scanId, name])
+}
+
+model Subscription {
+  id          String    @id @default(cuid())
+  workspaceId String
+  plan        String
+  status      String
+  provider    String?
+  externalId  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model UsageEvent {
+  id          String    @id @default(cuid())
+  workspaceId String
+  event       String
+  quantity    Int       @default(1)
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
